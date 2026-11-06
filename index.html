@@ -182,6 +182,29 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
 .l-tools .left { display: flex; gap: 8px; }
 .flag { font-size: 13px; color: var(--warn); font-weight: 600; align-self: center; }
 
+/* Riepiloghi IA e ripasso */
+.ai { background: var(--surface-2); border-radius: 12px; padding: 14px; display: grid; gap: 10px; }
+.ai .brief { margin: 0; font-size: 16px; }
+.ai ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.ai details { border-top: 1px solid var(--line); padding: 4px 0; }
+.ai summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 500; }
+.ai details p { margin: 0 0 8px; color: var(--muted); }
+.ai .meta { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; }
+.err { color: var(--c-fis); font-size: 14px; margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { min-height: 44px; padding: 0 14px; border-radius: 22px; border: 1px solid var(--line); background: var(--surface); font-weight: 500; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.glance { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.gcard { display: flex; flex-direction: column; gap: 10px; }
+.gcard h3 { font-size: 18px; }
+.gcard .sub { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.gcard .actions { margin-top: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.flash { display: grid; gap: 16px; text-align: left; }
+.flash .q { font-family: var(--font-display); font-size: clamp(22px, 3.2vw, 30px); line-height: 1.25; margin: 0; }
+.flash .a { margin: 0; font-size: 18px; padding: 14px; background: var(--surface-2); border-radius: 12px; border-left: 4px solid var(--c); }
+.flash .row { display: flex; gap: 10px; flex-wrap: wrap; }
+.progress { font-size: 14px; color: var(--muted); }
+
 @media (max-width: 860px) {
   .app { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .nav { position: static; flex-direction: row; overflow-x: auto; gap: 8px; padding-bottom: 4px; }
@@ -246,7 +269,144 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
   var state = load();
   try { localStorage.setItem(KEY + '-t', '1'); localStorage.removeItem(KEY + '-t'); } catch (e) { storageOk = false; }
 
-  var ui = { confirm: null, notes: {}, newSubject: false, draft: { title: '', date: today() }, backupMsg: '' };
+  var ui = { confirm: null, notes: {}, newSubject: false, draft: { title: '', date: today() }, backupMsg: '',
+    open: {}, busy: {}, err: {}, rev: { filter: 'all' }, deck: null, bulk: null, bulkMsg: '' };
+
+  /* ---------- riepiloghi IA (capability "sample") ---------- */
+  var sampleFn = null;
+  try {
+    if (window.claude && window.claude.use) {
+      window.claude.use('sample').then(function (f) { if (f) { sampleFn = f; render(); } }, function () {});
+    }
+  } catch (e) {}
+
+  function errCopy(e) {
+    var c = e && e.code;
+    if (c === 'not_granted') return 'Permesso negato. Per usare i riepiloghi consenti a Claude di rispondere quando te lo chiede.';
+    if (c === 'rate_limited') return 'Troppe richieste ravvicinate. Aspetta un minuto e riprova.';
+    if (c === 'cancelled') return '';
+    return 'Non sono riuscito a generare il riepilogo. Riprova tra poco.';
+  }
+  function buildPrompt(s, l) {
+    return 'Sei un tutor di medicina. Parli a uno studente del secondo anno di Medicina e Chirurgia in Italia.\n' +
+      'Materia: ' + s.name + '\nArgomento della lezione: ' + l.title + '\n' +
+      'Note dello studente (possono essere vuote): ' + (l.note ? l.note : 'nessuna') + '\n\n' +
+      'Scrivi un riepilogo per il ripasso rapido, in italiano, rigoroso e al livello di un corso universitario. ' +
+      'Se il titolo è ambiguo, copri il contenuto più standard che questo argomento ha nei corsi di ' + s.name + '. ' +
+      'Non inventare valori numerici di cui non sei sicuro. Se le note contengono dettagli, usali.\n' +
+      'Rispondi SOLO con un oggetto JSON in questa forma:\n' +
+      '{"brief": "2-3 frasi che spiegano l\'idea centrale", "points": ["da 4 a 6 punti chiave, una frase breve ciascuno"], ' +
+      '"qa": [{"q": "domanda di richiamo attivo", "a": "risposta in 1-2 frasi"}]}\n' +
+      'In "qa" metti 4 domande.';
+  }
+  function validAi(d) {
+    return d && typeof d.brief === 'string' && Array.isArray(d.points) && Array.isArray(d.qa) &&
+      d.qa.every(function (x) { return x && typeof x.q === 'string' && typeof x.a === 'string'; });
+  }
+  function generate(sid, lid) {
+    var s = subj(sid), l = s && lesson(s, lid);
+    if (!l || !sampleFn || ui.busy[lid]) return Promise.resolve();
+    ui.busy[lid] = true; ui.err[lid] = ''; render();
+    return sampleFn.json(buildPrompt(s, l), { modelTier: 'default' }).then(function (d) {
+      if (!validAi(d)) throw { code: 'bad_format' };
+      l.ai = { brief: d.brief, points: d.points.map(String), qa: d.qa.map(function (x) { return { q: x.q, a: x.a }; }), at: today() };
+      ui.open[lid] = true; save();
+    }).catch(function (e) { ui.err[lid] = errCopy(e); throw e; }).then(function () { ui.busy[lid] = false; render(); }, function (e) { ui.busy[lid] = false; render(); throw e; });
+  }
+  function aiButton(s, l, busy, open) {
+    if (!sampleFn && !l.ai) return '';
+    if (busy) return '<button class="btn small" disabled>Sto scrivendo…</button>';
+    if (l.ai) return '<button class="btn small" data-action="ai-toggle" data-l="' + esc(l.id) + '">' + (open ? 'Nascondi riepilogo' : 'Riepilogo') + '</button>';
+    return '<button class="btn small" data-action="ai-gen" data-s="' + esc(s.id) + '" data-l="' + esc(l.id) + '">Genera riepilogo</button>';
+  }
+  function aiPanel(s, l) {
+    var a = l.ai;
+    var h = '<div class="ai"><p class="brief">' + esc(a.brief) + '</p><ul>' + a.points.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>';
+    h += a.qa.map(function (x) { return '<details><summary>' + esc(x.q) + '</summary><p>' + esc(x.a) + '</p></details>'; }).join('');
+    h += '<div class="meta"><span class="msg">Scritto da IA il ' + esc(shortDate(a.at)) + '. Controllalo sul libro prima di fidarti.</span>' +
+      (sampleFn ? '<button class="btn small" data-action="ai-gen" data-s="' + esc(s.id) + '" data-l="' + esc(l.id) + '">Rigenera</button>' : '') + '</div>';
+    if (!l.note) h += '<p class="msg">Suggerimento: scrivi nella nota i punti del tuo corso e poi rigenera, così il riepilogo segue le tue lezioni.</p>';
+    return h + '</div>';
+  }
+
+  /* ---------- pagina Ripasso ---------- */
+  function shuffle(a) { a = a.slice(); for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+  function reviewItems() {
+    var f = ui.rev.filter; if (f !== 'all' && !subj(f)) f = ui.rev.filter = 'all';
+    var out = [];
+    state.subjects.forEach(function (s) {
+      if (s.status !== 'active' || (f !== 'all' && f !== s.id)) return;
+      s.lessons.forEach(function (l) { out.push({ s: s, l: l }); });
+    });
+    return out;
+  }
+  function renderReview() {
+    var items = reviewItems(), withAi = items.filter(function (x) { return x.l.ai; }), missing = items.filter(function (x) { return !x.l.ai; });
+    function pr(x) { return x.l.done.studiata && !x.l.done.ripassata ? 0 : (!x.l.done.ripassata ? 1 : 2); }
+    withAi.sort(function (a, b) { var d = pr(a) - pr(b); if (d) return d; return a.l.date < b.l.date ? 1 : -1; });
+
+    var h = '<header class="page-head"><span class="eyebrow">Colpo d’occhio</span><h1>Ripasso</h1><p class="lead">Rileggi i riepiloghi delle lezioni oppure mettiti alla prova con le flashcard. Le lezioni studiate da più tempo e non ancora ripassate vengono per prime.</p></header>';
+    h += '<div class="chips" role="group" aria-label="Filtra per materia"><button class="chip" aria-pressed="' + (ui.rev.filter === 'all') + '" data-action="rev-filter" data-v="all">Tutte</button>' +
+      state.subjects.filter(function (s) { return s.status === 'active'; }).map(function (s) { return '<button class="chip" aria-pressed="' + (ui.rev.filter === s.id) + '" data-action="rev-filter" data-v="' + esc(s.id) + '">' + esc(s.name) + '</button>'; }).join('') + '</div>';
+
+    if (ui.deck) return h + renderDeck();
+
+    var nQ = withAi.reduce(function (n, x) { return n + x.l.ai.qa.length; }, 0);
+    h += '<section class="panel"><div class="queue"><div style="flex:1;min-width:220px"><h2 class="section-title" style="margin:0">Flashcard</h2><p class="msg">' +
+      (nQ ? 'Domande dai riepiloghi: ' + nQ + '. Ogni sessione ne propone fino a 15.' : 'Genera prima qualche riepilogo: le flashcard usano le sue domande.') + '</p></div>' +
+      '<button class="btn primary" style="--c:var(--c-5)" data-action="deck-start"' + (nQ ? '' : ' disabled') + '>Inizia</button></div></section>';
+
+    if (withAi.length) {
+      h += '<section><h2 class="section-title">Riepiloghi <span class="num" style="color:var(--muted);font-size:15px">' + withAi.length + '</span></h2><div class="glance">' +
+        withAi.map(function (x) {
+          var a = x.l.ai, due = pr(x) === 0;
+          return '<article class="panel gcard" style="--c:' + colorVar(x.s) + '"><div class="sub"><span class="swatch"></span>' + esc(x.s.name) + ' · ' + esc(shortDate(x.l.date)) + (due ? ' · <b style="color:var(--warn)">da ripassare</b>' : '') + '</div>' +
+            '<h3>' + esc(x.l.title) + '</h3><p style="margin:0">' + esc(a.brief) + '</p><ul style="margin:0;padding-left:20px">' + a.points.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>' +
+            '<div class="actions">' + (x.l.done.ripassata ? '<span class="msg">Ripassata il ' + esc(shortDate(x.l.done.ripassata)) + '</span>' : '<button class="btn small" data-action="advance" data-s="' + esc(x.s.id) + '" data-l="' + esc(x.l.id) + '" data-step="ripassata">Segna ripassata</button>') + '</div></article>';
+        }).join('') + '</div></section>';
+    }
+
+    if (missing.length) {
+      var b = ui.bulk;
+      h += '<section class="panel"><h2 class="section-title">Senza riepilogo <span class="num" style="color:var(--muted);font-size:15px">' + missing.length + '</span></h2>';
+      if (sampleFn) {
+        h += '<div class="row" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' +
+          (b && b.running ? '<button class="btn" data-action="bulk-stop">Ferma</button><span class="msg">Sto scrivendo ' + b.done + ' di ' + b.total + '…</span>' : '<button class="btn primary" style="--c:var(--c-5)" data-action="bulk-gen">Genera tutti i riepiloghi mancanti</button>') + '</div>';
+      } else h += '<p class="msg">I riepiloghi IA non sono disponibili in questa vista.</p>';
+      if (ui.bulkMsg) h += '<p class="err" role="alert">' + esc(ui.bulkMsg) + '</p>';
+      h += '<ul class="todo-list">' + missing.slice(0, 12).map(function (x) {
+        return '<li class="todo" style="--c:' + colorVar(x.s) + '"><span class="swatch"></span><div class="t">' + esc(x.l.title) + '<small>' + esc(x.s.name) + '</small></div>' +
+          (sampleFn ? (ui.busy[x.l.id] ? '<button class="btn small" disabled>Sto scrivendo…</button>' : '<button class="btn small" data-action="ai-gen" data-s="' + esc(x.s.id) + '" data-l="' + esc(x.l.id) + '">Genera</button>') : '') + '</li>';
+      }).join('') + '</ul>' + (missing.length > 12 ? '<p class="more">e altre ' + (missing.length - 12) + '</p>' : '') + '</section>';
+    }
+    if (!items.length) h += '<p class="empty">Non ci sono ancora lezioni. Aggiungile dalle pagine delle materie.</p>';
+    return h;
+  }
+  function renderDeck() {
+    var d = ui.deck, h = '<section class="panel flash">';
+    if (d.i >= d.cards.length) {
+      h += '<h2 class="section-title" style="margin:0">Sessione finita</h2><p class="lead">Ricordavi ' + d.ok + ' domande su ' + d.cards.length + '.</p>';
+      if (d.redo.length) h += '<div><h3 style="font-size:16px;margin-bottom:6px">Da rivedere</h3><ul style="margin:0;padding-left:20px">' + d.redo.map(function (c) { return '<li><b>' + esc(c.title) + '</b>: ' + esc(c.q) + '</li>'; }).join('') + '</ul></div>';
+      return h + '<div class="row"><button class="btn primary" style="--c:var(--c-5)" data-action="deck-start">Nuova sessione</button><button class="btn" data-action="deck-end">Torna ai riepiloghi</button></div></section>';
+    }
+    var c = d.cards[d.i];
+    h += '<div class="progress num">' + (d.i + 1) + ' / ' + d.cards.length + ' · ' + esc(c.sname) + ' · ' + esc(c.title) + '</div><p class="q">' + esc(c.q) + '</p>';
+    if (d.shown) h += '<p class="a" style="--c:' + c.color + '">' + esc(c.a) + '</p><div class="row"><button class="btn primary" style="--c:var(--c-bio)" data-action="deck-grade" data-v="ok">Ricordavo</button><button class="btn" data-action="deck-grade" data-v="no">Da rivedere</button></div>';
+    else h += '<div class="row"><button class="btn primary" style="--c:var(--c-5)" data-action="deck-show">Mostra la risposta</button><button class="btn" data-action="deck-end">Esci</button></div>';
+    return h + '</section>';
+  }
+  function runBulk() {
+    var todo = reviewItems().filter(function (x) { return !x.l.ai; });
+    ui.bulk = { running: true, done: 0, total: todo.length, stop: false }; ui.bulkMsg = ''; render();
+    var i = 0;
+    (function next() {
+      if (!ui.bulk || ui.bulk.stop || i >= todo.length) { if (ui.bulk) ui.bulk.running = false; render(); return; }
+      var x = todo[i++];
+      generate(x.s.id, x.l.id).then(function () { ui.bulk.done++; next(); }, function (e) {
+        ui.bulkMsg = errCopy(e) || 'Interrotto.'; ui.bulk.running = false; render();
+      });
+    })();
+  }
 
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   function subj(id) { return state.subjects.filter(function (s) { return s.id === id; })[0]; }
@@ -284,12 +444,14 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
   function currentView() {
     var h = (location.hash || '').replace('#', '');
     if (h.indexOf('m-') === 0 && subj(h.slice(2))) return h;
+    if (h === 'ripasso') return h;
     return 'oggi';
   }
 
   function renderNav(view) {
     var h = '<div class="brand">Diario di Studio</div>';
     h += '<a class="nav-item" href="#oggi" ' + (view === 'oggi' ? 'aria-current="page"' : '') + ' style="--c:var(--ink)"><span class="dot"></span><span class="name">Oggi</span><span class="count"></span></a>';
+    h += '<a class="nav-item" href="#ripasso" ' + (view === 'ripasso' ? 'aria-current="page"' : '') + ' style="--c:var(--c-5)"><span class="dot"></span><span class="name">Ripasso</span><span class="count"></span></a>';
     function item(s) {
       var st = stats(s), pct = st.n ? Math.round(st.studiata / st.n * 100) : 0;
       return '<a class="nav-item ' + (s.status === 'queued' ? 'queued' : '') + '" href="#m-' + esc(s.id) + '" ' + (view === 'm-' + s.id ? 'aria-current="page"' : '') + ' style="--c:' + colorVar(s) + '">' +
@@ -439,13 +601,16 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     var needsReview = l.done.studiata && !l.done.ripassata && daysBetween(l.done.studiata, t) >= REVIEW_AFTER_DAYS;
     var noteOpen = ui.notes[l.id] || (l.note && l.note.length);
     var armed = ui.confirm === 'l:' + l.id;
+    var open = !!ui.open[l.id] && l.ai, busy = !!ui.busy[l.id];
     var h = '<li class="lesson"><div class="l-top"><input class="l-title" type="text" data-field="title" data-s="' + esc(s.id) + '" data-l="' + esc(l.id) + '" value="' + esc(l.title) + '" aria-label="Titolo lezione"><span class="l-date">' + esc(shortDate(l.date)) + '</span></div>';
     h += '<div class="steps">' + STEPS.map(function (x) {
       var on = !!l.done[x[0]];
       return '<button class="step" aria-pressed="' + on + '" data-action="toggle-step" data-s="' + esc(s.id) + '" data-l="' + esc(l.id) + '" data-step="' + x[0] + '"' + (on ? ' title="' + esc(shortDate(l.done[x[0]])) + '"' : '') + '><span class="tick">✓</span>' + x[1] + '</button>';
     }).join('') + '</div>';
-    h += '<div class="l-tools"><div class="left"><button class="btn small" data-action="toggle-note" data-l="' + esc(l.id) + '">' + (noteOpen ? 'Nascondi nota' : 'Nota') + '</button>' + (needsReview ? '<span class="flag">Da ripassare</span>' : '') + '</div>' +
+    h += '<div class="l-tools"><div class="left"><button class="btn small" data-action="toggle-note" data-l="' + esc(l.id) + '">' + (noteOpen ? 'Nascondi nota' : 'Nota') + '</button>' + aiButton(s, l, busy, open) + (needsReview ? '<span class="flag">Da ripassare</span>' : '') + '</div>' +
       '<button class="btn small danger ' + (armed ? 'armed' : '') + '" data-action="del-lesson" data-s="' + esc(s.id) + '" data-l="' + esc(l.id) + '">' + (armed ? 'Conferma' : 'Elimina') + '</button></div>';
+    if (ui.err[l.id]) h += '<p class="err" role="alert">' + esc(ui.err[l.id]) + '</p>';
+    if (open) h += aiPanel(s, l);
     if (noteOpen) h += '<textarea data-field="note" data-s="' + esc(s.id) + '" data-l="' + esc(l.id) + '" placeholder="Es. da rivedere la pompa Na/K" aria-label="Nota sulla lezione">' + esc(l.note || '') + '</textarea>';
     return h + '</li>';
   }
@@ -455,8 +620,9 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     renderNav(view);
     var main = document.getElementById('main');
     if (view === 'oggi') main.innerHTML = renderHome();
+    else if (view === 'ripasso') main.innerHTML = renderReview();
     else main.innerHTML = renderSubject(subj(view.slice(2)));
-    var t = (view === 'oggi') ? 'Diario di Studio' : subj(view.slice(2)).name + ' · Diario di Studio';
+    var t = (view === 'oggi') ? 'Diario di Studio' : view === 'ripasso' ? 'Ripasso · Diario di Studio' : subj(view.slice(2)).name + ' · Diario di Studio';
     try { document.title = t; } catch (e) {}
   }
 
@@ -486,6 +652,19 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
       else ui.confirm = 's:' + sid;
       render();
     }
+    else if (a === 'ai-gen') { generate(sid, lid).catch(function () {}); }
+    else if (a === 'ai-toggle') { ui.open[lid] = !ui.open[lid]; render(); }
+    else if (a === 'rev-filter') { ui.rev.filter = el.getAttribute('data-v'); ui.deck = null; render(); }
+    else if (a === 'bulk-gen') { runBulk(); }
+    else if (a === 'bulk-stop') { if (ui.bulk) ui.bulk.stop = true; }
+    else if (a === 'deck-start') {
+      var cards = [];
+      reviewItems().forEach(function (x) { if (x.l.ai) x.l.ai.qa.forEach(function (qa) { cards.push({ title: x.l.title, sname: x.s.name, color: colorVar(x.s), q: qa.q, a: qa.a }); }); });
+      ui.deck = { cards: shuffle(cards).slice(0, 15), i: 0, shown: false, ok: 0, redo: [] }; render();
+    }
+    else if (a === 'deck-show') { ui.deck.shown = true; render(); }
+    else if (a === 'deck-grade') { var dk = ui.deck; if (el.getAttribute('data-v') === 'ok') dk.ok++; else dk.redo.push(dk.cards[dk.i]); dk.i++; dk.shown = false; render(); }
+    else if (a === 'deck-end') { ui.deck = null; render(); }
     else if (a === 'set-status') { subj(sid).status = el.getAttribute('data-v'); save(); render(); }
     else if (a === 'new-subject') { ui.newSubject = true; render(); var i = document.getElementById('new-subject-name'); if (i) i.focus(); }
     else if (a === 'copy-backup') {
