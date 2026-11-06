@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Diario di Studio</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: sidebar di navigazione (materie) + area principale. Sotto 860px la sidebar diventa una barra scorrevole. */
+:root {
+  --bg: #eef2f5;
+  --surface: #ffffff;
+  --surface-2: #f6f8fa;
+  --ink: #14202b;
+  --muted: #5b6a77;
+  --line: #dbe2e8;
+  --warn: #9a5b00;
+  --c-fis: #c4402f;
+  --c-bio: #16796b;
+  --c-mol: #6350c2;
+  --c-4: #a8690d;
+  --c-5: #2a65ad;
+  --c-6: #ad3c74;
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
+  --font-body: "IBM Plex Sans", -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e151c; --surface: #16202a; --surface-2: #1b2733; --ink: #e8eef3; --muted: #93a2af; --line: #26343f; --warn: #e3ab55;
+    --c-fis: #f0806f; --c-bio: #4cc3b0; --c-mol: #a091f2; --c-4: #e3ab55; --c-5: #7db1ef; --c-6: #ea88b8;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e151c; --surface: #16202a; --surface-2: #1b2733; --ink: #e8eef3; --muted: #93a2af; --line: #26343f; --warn: #e3ab55;
+  --c-fis: #f0806f; --c-bio: #4cc3b0; --c-mol: #a091f2; --c-4: #e3ab55; --c-5: #7db1ef; --c-6: #ea88b8;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.45;
+  padding-block: 20px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  -webkit-text-size-adjust: 100%;
+}
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--c, var(--c-5)); outline-offset: 2px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.15; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.app { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 28px; align-items: start; }
+
+/* Navigazione */
+.nav { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 4px; }
+.brand { font-family: var(--font-display); font-weight: 700; font-size: 22px; padding: 4px 12px 14px; letter-spacing: -0.01em; }
+.nav-label { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 14px 12px 4px; font-weight: 600; }
+.nav-item {
+  display: grid; grid-template-columns: 10px 1fr auto; column-gap: 10px; row-gap: 6px; align-items: center;
+  min-height: 52px; padding: 8px 12px; border-radius: 10px; color: inherit; text-decoration: none;
+}
+.nav-item:hover { background: var(--surface-2); }
+.nav-item[aria-current="page"] { background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.nav-item .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c, var(--ink)); }
+.nav-item .name { font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+.nav-item .count { font-size: 13px; color: var(--muted); }
+.nav-item .mini { grid-column: 2 / 4; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.nav-item .mini i { display: block; height: 100%; background: var(--c); }
+.nav-item.queued { opacity: 0.8; }
+.nav-add { margin-top: 8px; min-height: 44px; border: 1px dashed var(--line); background: transparent; border-radius: 10px; color: var(--muted); text-align: left; padding: 0 12px; }
+.nav-add:hover { background: var(--surface-2); color: var(--ink); }
+.nav-form { display: flex; gap: 6px; margin-top: 8px; }
+.nav-form input { flex: 1; min-width: 0; }
+
+/* Controlli base */
+input[type="text"], input[type="date"], textarea {
+  min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--surface); width: 100%;
+}
+textarea { resize: vertical; min-height: 88px; }
+.btn {
+  min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--surface); font-weight: 500; white-space: nowrap;
+}
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--c, var(--ink)); border-color: var(--c, var(--ink)); color: var(--surface); }
+.btn.primary:hover { filter: brightness(1.08); background: var(--c, var(--ink)); }
+.btn.danger { color: var(--c-fis); }
+.btn.danger.armed { background: var(--c-fis); border-color: var(--c-fis); color: var(--surface); }
+.btn.small { min-height: 40px; padding: 0 12px; font-size: 14px; }
+
+/* Struttura pagina */
+.main { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+.page-head { display: flex; flex-direction: column; gap: 6px; }
+.eyebrow { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.page-head h1 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; }
+.lead { color: var(--muted); margin: 0; max-width: 62ch; }
+.section-title { font-size: 20px; margin-bottom: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+.banner { background: var(--surface); border: 1px solid var(--warn); color: var(--warn); border-radius: 10px; padding: 10px 14px; font-size: 14px; }
+
+/* Home */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.subject-card { display: flex; flex-direction: column; gap: 14px; text-decoration: none; color: inherit; }
+.subject-card header { display: flex; align-items: center; gap: 10px; }
+.subject-card h3 { font-size: 22px; flex: 1; }
+.swatch { width: 12px; height: 12px; border-radius: 50%; background: var(--c); flex: none; }
+.days { display: flex; align-items: baseline; gap: 10px; }
+.days .big { font-family: var(--font-mono); font-size: 44px; line-height: 1; color: var(--c); font-weight: 500; }
+.days .unit { color: var(--muted); font-size: 14px; }
+.facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0; }
+.facts div { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
+.facts dt { font-size: 12px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; font-weight: 600; }
+.facts dd { margin: 2px 0 0; font-family: var(--font-mono); font-size: 20px; }
+.facts dd small { font-family: var(--font-body); font-size: 12px; color: var(--muted); }
+.field-row { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
+.field-row input { max-width: 190px; }
+
+.todo-group + .todo-group { margin-top: 20px; }
+.todo-group h3 { font-size: 16px; display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.todo-group h3 .num { color: var(--muted); font-size: 14px; }
+.todo-list { list-style: none; margin: 0; padding: 0; }
+.todo { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); min-height: 56px; }
+.todo:first-child { border-top: 0; }
+.todo .swatch { align-self: center; }
+.todo .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.todo .t small { display: block; color: var(--muted); font-size: 13px; }
+.more { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+.empty { color: var(--muted); margin: 0; }
+
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; align-items: end; height: 130px; }
+.week .d { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; font-size: 12px; color: var(--muted); }
+.week .bar { width: 100%; max-width: 44px; border-radius: 6px 6px 2px 2px; background: var(--c-5); min-height: 3px; }
+.week .bar.zero { background: var(--line); }
+.week .d.today { color: var(--ink); font-weight: 600; }
+
+.queue { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.queue p { margin: 0; flex: 1; min-width: 200px; color: var(--muted); }
+
+details.backup summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 500; }
+details.backup .stack { display: flex; flex-direction: column; gap: 10px; padding-top: 6px; }
+details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
+.msg { font-size: 14px; color: var(--muted); margin: 0; }
+
+/* Pagina materia */
+.subject-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; justify-content: space-between; }
+.subject-head h1 { display: flex; align-items: center; gap: 12px; }
+.subject-head h1 .swatch { width: 16px; height: 16px; }
+.head-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.meters { display: grid; gap: 12px; }
+.meter { display: grid; grid-template-columns: 92px 1fr 64px; align-items: center; gap: 12px; }
+.meter .lab { font-size: 14px; color: var(--muted); font-weight: 500; }
+.meter .track { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.meter .track i { display: block; height: 100%; background: var(--c); border-radius: 5px; }
+.meter .val { font-family: var(--font-mono); font-size: 14px; text-align: right; }
+.add { display: grid; grid-template-columns: minmax(0, 1fr) 170px auto; gap: 10px; }
+.lessons { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.lesson { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 12px; }
+.l-top { display: flex; align-items: center; gap: 10px; }
+.l-top input.l-title { border-color: transparent; background: transparent; font-weight: 600; font-size: 17px; padding-left: 4px; }
+.l-top input.l-title:hover, .l-top input.l-title:focus { border-color: var(--line); background: var(--surface-2); }
+.l-date { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.step {
+  min-height: 48px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 8px; font-size: 14px; font-weight: 500;
+}
+.step .tick { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--muted); display: grid; place-items: center; font-size: 12px; line-height: 1; flex: none; color: transparent; }
+.step[aria-pressed="true"] { background: color-mix(in srgb, var(--c) 16%, var(--surface)); border-color: var(--c); }
+.step[aria-pressed="true"] .tick { background: var(--c); border-color: var(--c); color: var(--surface); }
+.l-tools { display: flex; gap: 8px; justify-content: space-between; flex-wrap: wrap; }
+.l-tools .left { display: flex; gap: 8px; }
+.flag { font-size: 13px; color: var(--warn); font-weight: 600; align-self: center; }
+
+@media (max-width: 860px) {
+  .app { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .nav { position: static; flex-direction: row; overflow-x: auto; gap: 8px; padding-bottom: 4px; }
+  .brand, .nav-label { display: none; }
+  .nav-item { flex: none; min-width: 150px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+  .nav-add { flex: none; margin-top: 0; }
+  .nav-form { flex: none; margin-top: 0; min-width: 260px; }
+}
+@media (max-width: 560px) {
+  .add { grid-template-columns: 1fr 1fr; }
+  .add input[type="text"] { grid-column: 1 / -1; }
+  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .meter { grid-template-columns: 78px 1fr 52px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .step, .btn, .nav-item { transition: background-color .12s, border-color .12s; }
+  .meter .track i, .nav-item .mini i { transition: width .25s; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="nav" id="nav" aria-label="Materie"></nav>
+  <main class="main" id="main"></main>
+</div>
+<script>
+(function () {
+  var KEY = 'diario-di-studio-v1';
+  var STEPS = [['seguita', 'Seguita'], ['appunti', 'Appunti'], ['studiata', 'Studiata'], ['ripassata', 'Ripassata']];
+  var COLORS = ['--c-fis', '--c-bio', '--c-mol', '--c-4', '--c-5', '--c-6'];
+  var REVIEW_AFTER_DAYS = 7;
+
+  /* ---------- date ---------- */
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function iso(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function today() { return iso(new Date()); }
+  function parse(s) { var p = s.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); }
+  function daysBetween(a, b) { return Math.round((Date.UTC.apply(null, ymd(b)) - Date.UTC.apply(null, ymd(a))) / 864e5); }
+  function ymd(s) { var p = s.split('-').map(Number); return [p[0], p[1] - 1, p[2]]; }
+  function shortDate(s) { return parse(s).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }); }
+  function addDays(s, n) { var d = parse(s); d.setDate(d.getDate() + n); return iso(d); }
+
+  /* ---------- stato ---------- */
+  var storageOk = true;
+  function seed() {
+    return { subjects: [
+      { id: 'fisiologia', name: 'Fisiologia', color: 0, status: 'active', exam: '2027-01-15', lessons: [] },
+      { id: 'biochimica', name: 'Biochimica', color: 1, status: 'active', exam: '2027-02-15', lessons: [] },
+      { id: 'biomol', name: 'Biologia molecolare', color: 2, status: 'queued', exam: '', lessons: [] }
+    ] };
+  }
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) { var d = JSON.parse(raw); if (d && Array.isArray(d.subjects)) return d; }
+    } catch (e) { storageOk = false; }
+    return seed();
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); storageOk = true; } catch (e) { storageOk = false; }
+  }
+  var state = load();
+  try { localStorage.setItem(KEY + '-t', '1'); localStorage.removeItem(KEY + '-t'); } catch (e) { storageOk = false; }
+
+  var ui = { confirm: null, notes: {}, newSubject: false, draft: { title: '', date: today() }, backupMsg: '' };
+
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  function subj(id) { return state.subjects.filter(function (s) { return s.id === id; })[0]; }
+  function lesson(s, id) { return s.lessons.filter(function (l) { return l.id === id; })[0]; }
+  function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function colorVar(s) { return 'var(' + COLORS[s.color % COLORS.length] + ')'; }
+
+  /* ---------- calcoli ---------- */
+  function stats(s) {
+    var r = { n: s.lessons.length, seguita: 0, appunti: 0, studiata: 0, ripassata: 0, backlog: [], noNotes: [], review: [] };
+    var t = today();
+    s.lessons.forEach(function (l) {
+      STEPS.forEach(function (st) { if (l.done[st[0]]) r[st[0]]++; });
+      if (l.done.seguita && !l.done.studiata) r.backlog.push(l);
+      if (l.done.seguita && !l.done.appunti) r.noNotes.push(l);
+      if (l.done.studiata && !l.done.ripassata && daysBetween(l.done.studiata, t) >= REVIEW_AFTER_DAYS) r.review.push(l);
+    });
+    function byDate(a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; }
+    r.backlog.sort(byDate); r.noNotes.sort(byDate); r.review.sort(function (a, b) { return a.done.studiata < b.done.studiata ? -1 : 1; });
+    return r;
+  }
+  function examInfo(s, backlogCount) {
+    if (!s.exam) return { days: null, text: 'Data da definire', pace: null };
+    var days = daysBetween(today(), s.exam);
+    if (days < 0) return { days: days, text: 'Esame passato', pace: null };
+    var pace = null;
+    if (backlogCount > 0 && days > 0) {
+      var weeks = Math.max(1, (days - 14) / 7);
+      pace = Math.ceil(backlogCount / weeks);
+    }
+    return { days: days, text: 'giorni all’esame', pace: pace };
+  }
+
+  /* ---------- viste ---------- */
+  function currentView() {
+    var h = (location.hash || '').replace('#', '');
+    if (h.indexOf('m-') === 0 && subj(h.slice(2))) return h;
+    return 'oggi';
+  }
+
+  function renderNav(view) {
+    var h = '<div class="brand">Diario di Studio</div>';
+    h += '<a class="nav-item" href="#oggi" ' + (view === 'oggi' ? 'aria-current="page"' : '') + ' style="--c:var(--ink)"><span class="dot"></span><span class="name">Oggi</span><span class="count"></span></a>';
+    function item(s) {
+      var st = stats(s), pct = st.n ? Math.round(st.studiata / st.n * 100) : 0;
+      return '<a class="nav-item ' + (s.status === 'queued' ? 'queued' : '') + '" href="#m-' + esc(s.id) + '" ' + (view === 'm-' + s.id ? 'aria-current="page"' : '') + ' style="--c:' + colorVar(s) + '">' +
+        '<span class="dot"></span><span class="name">' + esc(s.name) + '</span><span class="count num">' + st.studiata + '/' + st.n + '</span>' +
+        '<span class="mini"><i style="width:' + pct + '%"></i></span></a>';
+    }
+    var active = state.subjects.filter(function (s) { return s.status === 'active'; });
+    var queued = state.subjects.filter(function (s) { return s.status !== 'active'; });
+    h += '<div class="nav-label">Materie</div>' + active.map(item).join('');
+    if (queued.length) h += '<div class="nav-label">In coda</div>' + queued.map(item).join('');
+    if (ui.newSubject) {
+      h += '<form class="nav-form" data-form="new-subject"><input type="text" id="new-subject-name" placeholder="Nome materia" aria-label="Nome della nuova materia" autocomplete="off"><button class="btn primary" style="--c:var(--ink)" type="submit">Crea</button></form>';
+    } else {
+      h += '<button class="nav-add" data-action="new-subject">+ Nuova materia</button>';
+    }
+    document.getElementById('nav').innerHTML = h;
+  }
+
+  function todoGroup(title, items, stepKey, btnLabel, sub) {
+    if (!items.length) return '';
+    var shown = items.slice(0, 8);
+    var h = '<div class="todo-group"><h3>' + title + ' <span class="num">' + items.length + '</span></h3><ul class="todo-list">';
+    shown.forEach(function (x) {
+      h += '<li class="todo" style="--c:' + colorVar(x.s) + '"><span class="swatch"></span><div class="t">' + esc(x.l.title) +
+        '<small>' + esc(x.s.name) + ' · ' + esc(sub(x.l)) + '</small></div>' +
+        '<button class="btn small" data-action="advance" data-s="' + esc(x.s.id) + '" data-l="' + esc(x.l.id) + '" data-step="' + stepKey + '">' + btnLabel + '</button></li>';
+    });
+    h += '</ul>';
+    if (items.length > shown.length) h += '<p class="more">e altre ' + (items.length - shown.length) + ' nella pagina della materia</p>';
+    return h + '</div>';
+  }
+
+  function renderHome() {
+    var active = state.subjects.filter(function (s) { return s.status === 'active'; });
+    var queued = state.subjects.filter(function (s) { return s.status !== 'active'; });
+    var all = { backlog: [], noNotes: [], review: [] }, totalLessons = 0;
+    active.forEach(function (s) {
+      var st = stats(s); totalLessons += st.n;
+      st.backlog.forEach(function (l) { all.backlog.push({ s: s, l: l }); });
+      st.noNotes.forEach(function (l) { all.noNotes.push({ s: s, l: l }); });
+      st.review.forEach(function (l) { all.review.push({ s: s, l: l }); });
+    });
+    var t = today();
+    var dateLabel = new Date().toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+    var lead;
+    if (!totalLessons) lead = 'Nessuna lezione registrata. Apri una materia e aggiungi quella di oggi.';
+    else if (!all.backlog.length && !all.review.length && !all.noNotes.length) lead = 'Sei in pari. Niente di arretrato e niente da ripassare.';
+    else {
+      var bits = [];
+      if (all.backlog.length) bits.push(all.backlog.length + (all.backlog.length === 1 ? ' lezione da studiare' : ' lezioni da studiare'));
+      if (all.review.length) bits.push(all.review.length + (all.review.length === 1 ? ' da ripassare' : ' da ripassare'));
+      if (all.noNotes.length) bits.push(all.noNotes.length + (all.noNotes.length === 1 ? ' con appunti da completare' : ' con appunti da completare'));
+      lead = bits.join(', ') + '.';
+    }
+
+    var h = '<header class="page-head"><span class="eyebrow">' + esc(dateLabel) + '</span><h1>Oggi</h1><p class="lead">' + esc(lead) + '</p></header>';
+    if (!storageOk) h += '<div class="banner">Il salvataggio automatico non è disponibile in questo browser. Usa Backup in fondo alla pagina per non perdere i dati.</div>';
+
+    h += '<section><div class="cards">';
+    active.forEach(function (s) {
+      var st = stats(s), ex = examInfo(s, st.backlog.length);
+      var weekStart = addDays(t, -6), thisWeek = 0;
+      s.lessons.forEach(function (l) { if (l.done.studiata && l.done.studiata >= weekStart) thisWeek++; });
+      h += '<article class="panel subject-card" style="--c:' + colorVar(s) + '"><header><span class="swatch"></span><h3><a href="#m-' + esc(s.id) + '" style="color:inherit;text-decoration:none">' + esc(s.name) + '</a></h3></header>';
+      if (ex.days !== null && ex.days >= 0) h += '<div class="days"><span class="big">' + ex.days + '</span><span class="unit">' + ex.text + '</span></div>';
+      else h += '<div class="days"><span class="unit">' + ex.text + '</span></div>';
+      h += '<dl class="facts"><div><dt>Arretrato</dt><dd>' + st.backlog.length + ' <small>da studiare</small></dd></div>' +
+        '<div><dt>Studiate</dt><dd>' + st.studiata + '<small> su ' + st.n + '</small></dd></div>' +
+        '<div><dt>Ultimi 7 giorni</dt><dd>' + thisWeek + ' <small>studiate</small></dd></div>' +
+        '<div><dt>Ritmo</dt><dd>' + (ex.pace ? '≈' + ex.pace + ' <small>a settimana</small>' : '–') + '</dd></div></dl>';
+      h += '<label class="field-row">Esame (indicativo) <input type="date" data-field="exam" data-s="' + esc(s.id) + '" value="' + esc(s.exam) + '"></label></article>';
+    });
+    h += '</div></section>';
+
+    var todo = todoGroup('Da studiare', all.backlog, 'studiata', 'Segna studiata', function (l) { return 'seguita il ' + shortDate(l.date); }) +
+      todoGroup('Da ripassare', all.review, 'ripassata', 'Segna ripassata', function (l) { return 'studiata il ' + shortDate(l.done.studiata); }) +
+      todoGroup('Appunti da completare', all.noNotes, 'appunti', 'Appunti fatti', function (l) { return 'lezione del ' + shortDate(l.date); });
+    h += '<section class="panel"><h2 class="section-title">Da fare adesso</h2>' + (todo || '<p class="empty">Niente in sospeso.</p>') + '</section>';
+
+    var days = [], max = 3;
+    for (var i = 6; i >= 0; i--) {
+      var day = addDays(t, -i), c = 0;
+      active.forEach(function (s) { s.lessons.forEach(function (l) { if (l.done.studiata === day) c++; if (l.done.ripassata === day) c++; }); });
+      days.push({ day: day, c: c }); if (c > max) max = c;
+    }
+    h += '<section class="panel"><h2 class="section-title">Ultimi 7 giorni</h2><div class="week" role="img" aria-label="Lezioni studiate o ripassate negli ultimi sette giorni">' +
+      days.map(function (d) {
+        var lab = parse(d.day).toLocaleDateString('it-IT', { weekday: 'short' });
+        return '<div class="d ' + (d.day === t ? 'today' : '') + '"><span class="num">' + d.c + '</span><div class="bar ' + (d.c ? '' : 'zero') + '" style="height:' + (d.c ? Math.round(d.c / max * 80) : 0) + 'px"></div><span>' + esc(lab) + '</span></div>';
+      }).join('') + '</div><p class="msg" style="margin-top:10px">Lezioni studiate o ripassate per giorno.</p></section>';
+
+    if (queued.length) {
+      h += '<section><h2 class="section-title">In coda</h2><div class="cards">';
+      queued.forEach(function (s) {
+        h += '<article class="panel queue" style="--c:' + colorVar(s) + '"><span class="swatch"></span><div style="flex:1;min-width:160px"><h3 style="font-size:18px">' + esc(s.name) + '</h3></div>' +
+          '<p>Da attivare quando inizi a studiarla.</p><button class="btn" data-action="set-status" data-s="' + esc(s.id) + '" data-v="active">Attiva</button></article>';
+      });
+      h += '</div></section>';
+    }
+
+    var json = JSON.stringify(state);
+    h += '<section class="panel"><details class="backup"><summary>Backup e ripristino</summary><div class="stack">' +
+      '<p class="msg">Copia questo testo e conservalo (per esempio in Note) per salvare tutti i dati. Per ripristinarli incollalo nel secondo riquadro.</p>' +
+      '<textarea id="backup-out" readonly aria-label="Dati da copiare">' + esc(json) + '</textarea>' +
+      '<div><button class="btn" data-action="copy-backup">Copia i dati</button></div>' +
+      '<textarea id="backup-in" placeholder="Incolla qui i dati salvati" aria-label="Dati da ripristinare"></textarea>' +
+      '<div><button class="btn" data-action="restore-backup">Ripristina</button></div>' +
+      '<p class="msg" role="status">' + esc(ui.backupMsg) + '</p></div></details></section>';
+    return h;
+  }
+
+  function meter(label, n, total) {
+    var pct = total ? Math.round(n / total * 100) : 0;
+    return '<div class="meter"><span class="lab">' + label + '</span><div class="track"><i style="width:' + pct + '%"></i></div><span class="val">' + n + '/' + total + '</span></div>';
+  }
+
+  function renderSubject(s) {
+    var st = stats(s), ex = examInfo(s, st.backlog.length);
+    var armed = ui.confirm === 's:' + s.id;
+    var h = '<div class="main" style="--c:' + colorVar(s) + '">';
+    h += '<header class="subject-head"><div class="page-head"><span class="eyebrow">' + (s.status === 'active' ? 'Materia attiva' : 'In coda') + '</span>' +
+      '<h1><span class="swatch"></span>' + esc(s.name) + '</h1>' +
+      '<p class="lead">' + (ex.days !== null && ex.days >= 0 ? ex.days + ' giorni all’esame' : ex.text) + (ex.pace ? ' · per smaltire l’arretrato servono circa ' + ex.pace + ' lezioni a settimana' : '') + '</p></div>' +
+      '<div class="head-tools"><label class="field-row">Esame <input type="date" data-field="exam" data-s="' + esc(s.id) + '" value="' + esc(s.exam) + '"></label>' +
+      '<button class="btn" data-action="set-status" data-s="' + esc(s.id) + '" data-v="' + (s.status === 'active' ? 'queued' : 'active') + '">' + (s.status === 'active' ? 'Metti in coda' : 'Attiva') + '</button>' +
+      '<button class="btn danger ' + (armed ? 'armed' : '') + '" data-action="del-subject" data-s="' + esc(s.id) + '">' + (armed ? 'Conferma eliminazione' : 'Elimina materia') + '</button></div></header>';
+
+    h += '<section class="panel"><div class="meters">' + STEPS.map(function (x) { return meter(x[1], st[x[0]], st.n); }).join('') + '</div></section>';
+
+    h += '<section><h2 class="section-title">Nuova lezione</h2><form class="add" data-form="add-lesson" data-s="' + esc(s.id) + '">' +
+      '<input type="text" id="new-title" data-field="draft-title" placeholder="Titolo (es. Potenziale d’azione)" aria-label="Titolo della lezione" autocomplete="off" value="' + esc(ui.draft.title) + '">' +
+      '<input type="date" data-field="draft-date" aria-label="Data della lezione" value="' + esc(ui.draft.date) + '">' +
+      '<button class="btn primary" type="submit">Aggiungi</button></form></section>';
+
+    h += '<section><h2 class="section-title">Lezioni <span class="num" style="color:var(--muted);font-size:15px">' + st.n + '</span></h2>';
+    if (!s.lessons.length) {
+      h += '<p class="empty">Ancora nessuna lezione. Scrivi il titolo della prima qui sopra: parte già segnata come seguita, poi spunti appunti, studio e ripasso man mano.</p>';
+    } else {
+      var list = s.lessons.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : (a.created < b.created ? 1 : -1); });
+      h += '<ul class="lessons">' + list.map(function (l) { return lessonRow(s, l); }).join('') + '</ul>';
+    }
+    return h + '</section></div>';
+  }
+
+  function lessonRow(s, l) {
+    var t = today();
+    var needsReview = l.done.studiata && !l.done.ripassata && daysBetween(l.done.studiata, t) >= REVIEW_AFTER_DAYS;
+    var noteOpen = ui.notes[l.id] || (l.note && l.note.length);
+    var armed = ui.confirm === 'l:' + l.id;
+    var h = '<li class="lesson"><div class="l-top"><input class="l-title" type="text" data-field="title" data-s="' + esc(s.id) + '" data-l="' + esc(l.id) + '" value="' + esc(l.title) + '" aria-label="Titolo lezione"><span class="l-date">' + esc(shortDate(l.date)) + '</span></div>';
+    h += '<div class="steps">' + STEPS.map(function (x) {
+      var on = !!l.done[x[0]];
+      return '<button class="step" aria-pressed="' + on + '" data-action="toggle-step" data-s="' + esc(s.id) + '" data-l="' + esc(l.id) + '" data-step="' + x[0] + '"' + (on ? ' title="' + esc(shortDate(l.done[x[0]])) + '"' : '') + '><span class="tick">✓</span>' + x[1] + '</button>';
+    }).join('') + '</div>';
+    h += '<div class="l-tools"><div class="left"><button class="btn small" data-action="toggle-note" data-l="' + esc(l.id) + '">' + (noteOpen ? 'Nascondi nota' : 'Nota') + '</button>' + (needsReview ? '<span class="flag">Da ripassare</span>' : '') + '</div>' +
+      '<button class="btn small danger ' + (armed ? 'armed' : '') + '" data-action="del-lesson" data-s="' + esc(s.id) + '" data-l="' + esc(l.id) + '">' + (armed ? 'Conferma' : 'Elimina') + '</button></div>';
+    if (noteOpen) h += '<textarea data-field="note" data-s="' + esc(s.id) + '" data-l="' + esc(l.id) + '" placeholder="Es. da rivedere la pompa Na/K" aria-label="Nota sulla lezione">' + esc(l.note || '') + '</textarea>';
+    return h + '</li>';
+  }
+
+  function render() {
+    var view = currentView();
+    renderNav(view);
+    var main = document.getElementById('main');
+    if (view === 'oggi') main.innerHTML = renderHome();
+    else main.innerHTML = renderSubject(subj(view.slice(2)));
+    var t = (view === 'oggi') ? 'Diario di Studio' : subj(view.slice(2)).name + ' · Diario di Studio';
+    try { document.title = t; } catch (e) {}
+  }
+
+  /* ---------- azioni ---------- */
+  function setStep(sid, lid, key, on) {
+    var l = lesson(subj(sid), lid);
+    l.done[key] = on ? today() : null;
+    save(); render();
+  }
+
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-action]');
+    if (!el) { if (ui.confirm) { ui.confirm = null; render(); } return; }
+    var a = el.getAttribute('data-action'), sid = el.getAttribute('data-s'), lid = el.getAttribute('data-l');
+    if (a !== 'del-lesson' && a !== 'del-subject' && ui.confirm) ui.confirm = null;
+
+    if (a === 'toggle-step') { var l = lesson(subj(sid), lid); setStep(sid, lid, el.getAttribute('data-step'), !l.done[el.getAttribute('data-step')]); }
+    else if (a === 'advance') { setStep(sid, lid, el.getAttribute('data-step'), true); }
+    else if (a === 'toggle-note') { ui.notes[lid] = !ui.notes[lid]; var s0 = currentView(); render(); }
+    else if (a === 'del-lesson') {
+      if (ui.confirm === 'l:' + lid) { var s = subj(sid); s.lessons = s.lessons.filter(function (x) { return x.id !== lid; }); ui.confirm = null; save(); }
+      else ui.confirm = 'l:' + lid;
+      render();
+    }
+    else if (a === 'del-subject') {
+      if (ui.confirm === 's:' + sid) { state.subjects = state.subjects.filter(function (x) { return x.id !== sid; }); ui.confirm = null; save(); location.hash = '#oggi'; }
+      else ui.confirm = 's:' + sid;
+      render();
+    }
+    else if (a === 'set-status') { subj(sid).status = el.getAttribute('data-v'); save(); render(); }
+    else if (a === 'new-subject') { ui.newSubject = true; render(); var i = document.getElementById('new-subject-name'); if (i) i.focus(); }
+    else if (a === 'copy-backup') {
+      var ta = document.getElementById('backup-out');
+      function fallback() { ta.focus(); ta.select(); ui.backupMsg = 'Testo selezionato: premi Copia dal menu di iPad.'; var m = document.querySelector('.backup .msg[role=status]'); if (m) m.textContent = ui.backupMsg; }
+      try { navigator.clipboard.writeText(ta.value).then(function () { var m = document.querySelector('.backup .msg[role=status]'); ui.backupMsg = 'Copiato.'; if (m) m.textContent = ui.backupMsg; }, fallback); } catch (err) { fallback(); }
+    }
+    else if (a === 'restore-backup') {
+      var raw = document.getElementById('backup-in').value.trim();
+      try {
+        var d = JSON.parse(raw);
+        if (!d || !Array.isArray(d.subjects)) throw new Error('formato');
+        state = d; save(); ui.backupMsg = 'Dati ripristinati.'; render();
+      } catch (err) { ui.backupMsg = 'Testo non valido: incolla esattamente quello copiato dal backup.'; var m2 = document.querySelector('.backup .msg[role=status]'); if (m2) m2.textContent = ui.backupMsg; }
+    }
+  });
+
+  document.addEventListener('submit', function (e) {
+    var f = e.target.closest('[data-form]'); if (!f) return;
+    e.preventDefault();
+    var kind = f.getAttribute('data-form');
+    if (kind === 'add-lesson') {
+      var s = subj(f.getAttribute('data-s')), title = ui.draft.title.trim();
+      if (!title) { document.getElementById('new-title').focus(); return; }
+      var date = ui.draft.date || today();
+      s.lessons.push({ id: uid(), title: title, date: date, created: Date.now(), note: '', done: { seguita: date <= today() ? date : null, appunti: null, studiata: null, ripassata: null } });
+      ui.draft.title = ''; save(); render();
+      var i = document.getElementById('new-title'); if (i) i.focus();
+    } else if (kind === 'new-subject') {
+      var name = document.getElementById('new-subject-name').value.trim();
+      ui.newSubject = false;
+      if (name) {
+        var ns = { id: uid(), name: name, color: state.subjects.length % COLORS.length, status: 'active', exam: '', lessons: [] };
+        state.subjects.push(ns); save(); location.hash = '#m-' + ns.id;
+      }
+      render();
+    }
+  });
+
+  document.addEventListener('input', function (e) {
+    var f = e.target.getAttribute && e.target.getAttribute('data-field');
+    if (f === 'draft-title') ui.draft.title = e.target.value;
+    if (f === 'draft-date') ui.draft.date = e.target.value;
+  });
+
+  document.addEventListener('change', function (e) {
+    var el = e.target, f = el.getAttribute && el.getAttribute('data-field');
+    if (!f) return;
+    var sid = el.getAttribute('data-s'), lid = el.getAttribute('data-l');
+    if (f === 'exam') { subj(sid).exam = el.value; save(); render(); }
+    else if (f === 'title') { var l = lesson(subj(sid), lid); l.title = el.value.trim() || l.title; save(); render(); }
+    else if (f === 'note') { lesson(subj(sid), lid).note = el.value; save(); }
+  });
+
+  window.addEventListener('hashchange', function () { ui.confirm = null; render(); window.scrollTo(0, 0); });
+  render();
+})();
+</script>
+</body>
+</html>
