@@ -270,9 +270,9 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
   try { localStorage.setItem(KEY + '-t', '1'); localStorage.removeItem(KEY + '-t'); } catch (e) { storageOk = false; }
 
   var BIOCHIMICA_ELENCO = [
-    'Introduzione', 'Acqua', 'DNA', 'Proteine', 'Lipidi', 'Carboidrati', 'Emoglobina', 'Enzimi', 'Cinetica enzimatica', 'Trasporto',
-    'Vitamine', 'Biosegnalazione', 'Ormoni', 'Introduzione al metabolismo', 'Catabolismo del glucosio', 'Metabolismo del glicogeno',
-    'Il ciclo di Krebs', 'Fosforilazione ossidativa', 'Metabolismo lipidico', 'Metabolismo proteico'
+    'Introduzione | studiata', 'Acqua | studiata', 'DNA | studiata', 'Proteine | studiata', 'Lipidi | studiata', 'Carboidrati | studiata', 'Emoglobina',
+    'Enzimi', 'Cinetica enzimatica', 'Trasporto', 'Vitamine | non seguita', 'Ormoni', 'Biosegnalazione', 'Introduzione al metabolismo',
+    'Catabolismo del glucosio | studiata', 'Il ciclo di Krebs', 'Metabolismo del glicogeno', 'Fosforilazione ossidativa', 'Metabolismo lipidico', 'Metabolismo proteico | non seguita'
   ].join('\n');
   var ui = { importText: null, importSeen: true, importMsg: '', confirm: null, notes: {}, newSubject: false, draft: { title: '', date: today() }, backupMsg: '',
     open: {}, busy: {}, err: {}, rev: { filter: 'all' }, deck: null, bulk: null, bulkMsg: '' };
@@ -591,9 +591,9 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
       '<input type="date" data-field="draft-date" aria-label="Data della lezione" value="' + esc(ui.draft.date) + '">' +
       '<button class="btn primary" type="submit">Aggiungi</button></form></section>';
 
-    var imp = ui.importText != null ? ui.importText : (s.id === 'biochimica' && !s.lessons.length ? BIOCHIMICA_ELENCO : '');
-    h += '<section class="panel"><details class="backup"' + (!s.lessons.length || ui.importMsg ? ' open' : '') + '><summary>Importa un elenco di lezioni</summary><div class="stack">' +
-      '<p class="msg">Una lezione per riga. Le righe già presenti vengono saltate. Dopo l’importazione puoi correggere ogni titolo toccandolo.</p>' +
+    var imp = ui.importText != null ? ui.importText : (s.id === 'biochimica' && !state.biochV2 ? BIOCHIMICA_ELENCO : '');
+    h += '<section class="panel"><details class="backup"' + (!s.lessons.length || ui.importMsg || imp ? ' open' : '') + '><summary>Importa un elenco di lezioni</summary><div class="stack">' +
+      '<p class="msg">Una lezione per riga, nell’ordine del corso. Aggiungi dopo una barra verticale lo stato: “| studiata” oppure “| non seguita”. Se una lezione esiste già, ne aggiorno ordine e stato senza toccare note e riepiloghi.</p>' +
       '<textarea id="import-text" data-field="import-text" style="font-family:var(--font-body);font-size:16px;min-height:160px" aria-label="Elenco delle lezioni">' + esc(imp) + '</textarea>' +
       '<label class="field-row" style="font-size:16px;color:inherit"><input type="checkbox" id="import-seen" data-field="import-seen" style="width:24px;height:24px"' + (ui.importSeen ? ' checked' : '') + '> Segna come già seguite</label>' +
       '<div><button class="btn primary" data-action="import-lessons" data-s="' + esc(s.id) + '">Importa</button></div>' +
@@ -603,7 +603,7 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     if (!s.lessons.length) {
       h += '<p class="empty">Ancora nessuna lezione. Scrivi il titolo della prima qui sopra: parte già segnata come seguita, poi spunti appunti, studio e ripasso man mano.</p>';
     } else {
-      var list = s.lessons.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : (a.created < b.created ? 1 : -1); });
+      var list = s.lessons.slice().sort(function (a, b) { return a.created - b.created; });
       h += '<ul class="lessons">' + list.map(function (l) { return lessonRow(s, l); }).join('') + '</ul>';
     }
     return h + '</section></div>';
@@ -667,16 +667,24 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     }
     else if (a === 'import-lessons') {
       var si = subj(sid), box = document.getElementById('import-text');
-      var have = {}; si.lessons.forEach(function (x) { have[x.title.toLowerCase()] = true; });
-      var added = 0, skipped = 0, base = Date.now();
+      var have = {}; si.lessons.forEach(function (x) { have[x.title.toLowerCase()] = x; });
+      var added = 0, updated = 0, base = Date.now(), n = 0, t0 = today();
+      function setStatus(l, tag) {
+        if (tag === 'studiata') { l.done.seguita = l.done.seguita || t0; l.done.appunti = l.done.appunti || t0; l.done.studiata = l.done.studiata || t0; }
+        else if (tag === 'non seguita') { l.done.seguita = null; l.done.appunti = null; l.done.studiata = null; l.done.ripassata = null; }
+      }
       box.value.split('\n').forEach(function (line) {
-        var title = line.trim(); if (!title) return;
-        if (have[title.toLowerCase()]) { skipped++; return; }
-        have[title.toLowerCase()] = true;
-        si.lessons.push({ id: uid(), title: title, date: '', created: base + added, note: '', done: { seguita: ui.importSeen ? today() : null, appunti: null, studiata: null, ripassata: null } });
-        added++;
+        if (!line.trim()) return;
+        var cut = line.lastIndexOf('|'), title = (cut >= 0 ? line.slice(0, cut) : line).trim(), tag = cut >= 0 ? line.slice(cut + 1).trim().toLowerCase() : '';
+        if (!title) return;
+        var ex = have[title.toLowerCase()], order = base + n++;
+        if (ex) { ex.created = order; setStatus(ex, tag); updated++; return; }
+        var l = { id: uid(), title: title, date: '', created: order, note: '', done: { seguita: ui.importSeen ? t0 : null, appunti: null, studiata: null, ripassata: null } };
+        setStatus(l, tag); have[title.toLowerCase()] = l; si.lessons.push(l); added++;
       });
-      ui.importText = ''; ui.importMsg = added ? 'Importate ' + added + ' lezioni' + (skipped ? ' (' + skipped + ' già presenti, saltate)' : '') + '.' : 'Nessuna lezione nuova da importare.';
+      if (sid === 'biochimica') state.biochV2 = true;
+      ui.importText = '';
+      ui.importMsg = (added || updated) ? 'Fatto: ' + added + ' lezioni nuove' + (updated ? ', ' + updated + ' già presenti e aggiornate' : '') + '.' : 'Niente da importare.';
       save(); render();
     }
     else if (a === 'ai-gen') { generate(sid, lid).catch(function () {}); }
