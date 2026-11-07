@@ -274,7 +274,7 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     'Enzimi', 'Cinetica enzimatica', 'Trasporto', 'Vitamine | non seguita', 'Ormoni', 'Biosegnalazione', 'Introduzione al metabolismo',
     'Catabolismo del glucosio | studiata', 'Il ciclo di Krebs', 'Metabolismo del glicogeno', 'Fosforilazione ossidativa', 'Metabolismo lipidico', 'Metabolismo proteico | non seguita'
   ].join('\n');
-  var ui = { importText: null, importSeen: true, importMsg: '', confirm: null, notes: {}, newSubject: false, draft: { title: '', date: today() }, backupMsg: '',
+  var ui = { slides: [], slidesMsg: '', slidesBusy: '', importText: null, importSeen: true, importMsg: '', confirm: null, notes: {}, newSubject: false, draft: { title: '', date: today() }, backupMsg: '',
     open: {}, busy: {}, err: {}, rev: { filter: 'all' }, deck: null, bulk: null, bulkMsg: '' };
 
   /* ---------- riepiloghi IA (capability "sample") ---------- */
@@ -296,13 +296,15 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     return 'Sei un tutor di medicina. Parli a uno studente del secondo anno di Medicina e Chirurgia in Italia.\n' +
       'Materia: ' + s.name + '\nArgomento della lezione: ' + l.title + '\n' +
       'Note dello studente (possono essere vuote): ' + (l.note ? l.note : 'nessuna') + '\n\n' +
+      (l.src ? 'Testo estratto automaticamente dalle slide del professore (può avere ordine o spazi imperfetti):\n<<<\n' + l.src + '\n>>>\n' +
+        'Basa riepilogo, punti e domande SOLO su questo materiale e usa la terminologia delle slide. Ignora intestazioni, nomi dell\'università e numeri di pagina.\n\n' : '') +
       'Scrivi un riepilogo per il ripasso rapido, in italiano, rigoroso e al livello di un corso universitario. ' +
       'Se il titolo è ambiguo, copri il contenuto più standard che questo argomento ha nei corsi di ' + s.name + '. ' +
       'Non inventare valori numerici di cui non sei sicuro. Se le note contengono dettagli, usali.\n' +
       'Rispondi SOLO con un oggetto JSON in questa forma:\n' +
       '{"brief": "2-3 frasi che spiegano l\'idea centrale", "points": ["da 4 a 6 punti chiave, una frase breve ciascuno"], ' +
       '"qa": [{"q": "domanda di richiamo attivo", "a": "risposta in 1-2 frasi"}]}\n' +
-      'In "qa" metti 4 domande.';
+      (l.src ? 'In "points" metti da 5 a 8 punti. In "qa" metti 8 domande che coprano tutta la lezione.' : 'In "qa" metti 4 domande.');
   }
   function validAi(d) {
     return d && typeof d.brief === 'string' && Array.isArray(d.points) && Array.isArray(d.qa) &&
@@ -314,7 +316,7 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     ui.busy[lid] = true; ui.err[lid] = ''; render();
     return sampleFn.json(buildPrompt(s, l), { modelTier: 'default' }).then(function (d) {
       if (!validAi(d)) throw { code: 'bad_format' };
-      l.ai = { brief: d.brief, points: d.points.map(String), qa: d.qa.map(function (x) { return { q: x.q, a: x.a }; }), at: today() };
+      l.ai = { brief: d.brief, points: d.points.map(String), qa: d.qa.map(function (x) { return { q: x.q, a: x.a }; }), at: today(), slides: !!l.src };
       ui.open[lid] = true; save();
     }).catch(function (e) { ui.err[lid] = errCopy(e); throw e; }).then(function () { ui.busy[lid] = false; render(); }, function (e) { ui.busy[lid] = false; render(); throw e; });
   }
@@ -328,7 +330,7 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     var a = l.ai;
     var h = '<div class="ai"><p class="brief">' + esc(a.brief) + '</p><ul>' + a.points.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>';
     h += a.qa.map(function (x) { return '<details><summary>' + esc(x.q) + '</summary><p>' + esc(x.a) + '</p></details>'; }).join('');
-    h += '<div class="meta"><span class="msg">Scritto da IA il ' + esc(shortDate(a.at)) + '. Controllalo sul libro prima di fidarti.</span>' +
+    h += '<div class="meta"><span class="msg">' + (a.slides ? 'Basato sulle tue slide, scritto da IA il ' : 'Basato solo sul titolo, scritto da IA il ') + esc(shortDate(a.at)) + '. Controllalo prima di fidarti.</span>' +
       (sampleFn ? '<button class="btn small" data-action="ai-gen" data-s="' + esc(s.id) + '" data-l="' + esc(l.id) + '">Rigenera</button>' : '') + '</div>';
     if (!l.note) h += '<p class="msg">Suggerimento: scrivi nella nota i punti del tuo corso e poi rigenera, così il riepilogo segue le tue lezioni.</p>';
     return h + '</div>';
@@ -400,8 +402,95 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     else h += '<div class="row"><button class="btn primary" style="--c:var(--c-5)" data-action="deck-show">Mostra la risposta</button><button class="btn" data-action="deck-end">Esci</button></div>';
     return h + '</section>';
   }
-  function runBulk() {
-    var todo = reviewItems().filter(function (x) { return !x.l.ai; });
+  /* ---------- slide: lettura locale di PDF e PowerPoint ---------- */
+  var LIBS = { pdf: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', zip: 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js' };
+  var PDF_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  var libP = {};
+  function loadLib(name) {
+    if (!libP[name]) libP[name] = new Promise(function (res, rej) {
+      var sc = document.createElement('script'); sc.src = LIBS[name]; sc.onload = res; sc.onerror = function () { delete libP[name]; rej(new Error('lib')); };
+      document.head.appendChild(sc);
+    });
+    return libP[name];
+  }
+  function readPdf(buf) {
+    return loadLib('pdf').then(function () {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER;
+      return window.pdfjsLib.getDocument({ data: buf }).promise;
+    }).then(function (pdf) {
+      var parts = [], chain = Promise.resolve();
+      function page(i) { chain = chain.then(function () { return pdf.getPage(i); }).then(function (pg) { return pg.getTextContent(); }).then(function (tc) {
+        var t = tc.items.map(function (x) { return x.str; }).join(' ').replace(/\s+/g, ' ').trim();
+        if (t) parts.push('[Slide ' + i + '] ' + t);
+      }); }
+      for (var i = 1; i <= pdf.numPages; i++) page(i);
+      return chain.then(function () { return { text: parts.join('\n'), pages: pdf.numPages }; });
+    });
+  }
+  function readPptx(buf) {
+    return loadLib('zip').then(function () { return window.JSZip.loadAsync(buf); }).then(function (zip) {
+      var names = Object.keys(zip.files).filter(function (n) { return /^ppt\/slides\/slide\d+\.xml$/.test(n); })
+        .sort(function (a, b) { return parseInt(a.match(/(\d+)\.xml/)[1], 10) - parseInt(b.match(/(\d+)\.xml/)[1], 10); });
+      var parts = [], chain = Promise.resolve();
+      names.forEach(function (n, i) { chain = chain.then(function () { return zip.files[n].async('string'); }).then(function (xml) {
+        var t = (xml.match(/<a:t>[^<]*<\/a:t>/g) || []).map(function (m) { return m.replace(/<\/?a:t>/g, ''); }).join(' ')
+          .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/\s+/g, ' ').trim();
+        if (t) parts.push('[Slide ' + (i + 1) + '] ' + t);
+      }); });
+      return chain.then(function () { return { text: parts.join('\n'), pages: names.length }; });
+    });
+  }
+  var STOP = { lezione: 1, bbm: 1, di: 1, del: 1, della: 1, dei: 1, delle: 1, al: 1, il: 1, la: 1, le: 1, lo: 1, e: 1, ed: 1, in: 1, per: 1, da: 1 };
+  function tokens(str) {
+    return str.toLowerCase().replace(/\.[a-z0-9]{2,4}$/, '').split(/[^a-zàèéìòù]+/).filter(function (w) { return w.length > 1 && !STOP[w]; }).map(function (w) { return w.slice(0, 6); });
+  }
+  function bestLesson(s, fname) {
+    var ft = tokens(fname), best = '', bs = 0;
+    s.lessons.forEach(function (l) {
+      var lt = tokens(l.title); if (!ft.length || !lt.length) return;
+      var ov = lt.filter(function (w) { return ft.indexOf(w) >= 0; }).length;
+      var sc = ov / Math.max(ft.length, lt.length);
+      if (sc > bs) { bs = sc; best = l.id; }
+    });
+    return bs >= 0.5 ? best : '';
+  }
+  function handleSlides(sid, files) {
+    var s = subj(sid), list = Array.prototype.slice.call(files), i = 0;
+    ui.slides = []; ui.slidesMsg = '';
+    (function next() {
+      if (i >= list.length) { ui.slidesBusy = ''; render(); return; }
+      var f = list[i++]; ui.slidesBusy = 'Leggo ' + i + ' di ' + list.length + ': ' + f.name + '…'; render();
+      var ext = (f.name.match(/\.([a-z0-9]+)$/i) || [0, ''])[1].toLowerCase();
+      var job = (ext === 'pdf' || ext === 'pptx') ? f.arrayBuffer().then(ext === 'pdf' ? readPdf : readPptx) : Promise.reject({ unsupported: true });
+      job.then(function (r) {
+        ui.slides.push({ name: f.name, text: r.text.slice(0, 30000), chars: r.text.length, pages: r.pages, lesson: bestLesson(s, f.name), error: '' });
+      }, function (err) {
+        ui.slides.push({ name: f.name, text: '', chars: 0, pages: 0, lesson: '', error: err && err.unsupported ? 'Formato non leggibile: esporta la presentazione in PDF.' : 'Non sono riuscito a leggere il file.' });
+      }).then(next);
+    })();
+  }
+  function renderSlides(s) {
+    var withSrc = s.lessons.filter(function (l) { return l.src; }).length;
+    var h = '<section class="panel"><details class="backup"' + (ui.slides && ui.slides.length || ui.slidesBusy || ui.slidesMsg || ui.bulk ? ' open' : '') + '><summary>Slide del corso (' + withSrc + ' di ' + s.lessons.length + ' lezioni)</summary><div class="stack">' +
+      '<p class="msg">Scegli tutti i PDF o le presentazioni PowerPoint insieme. I file restano sull\u2019iPad: ne leggo solo il testo, senza limiti di dimensione. Poi associ ogni file a una lezione.</p>' +
+      '<div><input type="file" id="slides-input" data-field="slides" data-s="' + esc(s.id) + '" multiple accept=".pdf,.pptx,application/pdf" aria-label="Scegli le slide"></div>';
+    if (ui.slidesBusy) h += '<p class="msg" role="status">' + esc(ui.slidesBusy) + '</p>';
+    if (ui.slides && ui.slides.length) {
+      h += '<ul class="todo-list">' + ui.slides.map(function (x, i) {
+        var opts = '<option value="">Non associare</option>' + s.lessons.slice().sort(function (a, b) { return a.created - b.created; }).map(function (l) { return '<option value="' + esc(l.id) + '"' + (l.id === x.lesson ? ' selected' : '') + '>' + esc(l.title) + '</option>'; }).join('');
+        var warn = x.error || (x.chars < 200 ? 'Poco testo: forse le slide sono immagini.' : '');
+        return '<li class="todo" style="flex-wrap:wrap"><div class="t">' + esc(x.name) + '<small>' + (x.error ? '' : x.pages + ' slide, ' + x.chars + ' caratteri') + (warn ? ' <b style="color:var(--warn)">' + esc(warn) + '</b>' : '') + '</small></div>' +
+          (x.error ? '' : '<select data-field="slide-match" data-i="' + i + '" aria-label="Lezione per ' + esc(x.name) + '" style="min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:inherit;padding:0 10px;max-width:100%">' + opts + '</select>') + '</li>';
+      }).join('') + '</ul><div><button class="btn primary" data-action="slides-apply" data-s="' + esc(s.id) + '">Salva nelle lezioni</button></div>';
+    }
+    if (ui.slidesMsg) h += '<p class="msg" role="status">' + esc(ui.slidesMsg) + '</p>';
+    var todo = s.lessons.filter(function (l) { return l.src && (!l.ai || !l.ai.slides); }).length, b = ui.bulk;
+    if (sampleFn && todo) h += '<div>' + (b && b.running ? '<button class="btn" data-action="bulk-stop">Ferma</button> <span class="msg">Sto scrivendo ' + b.done + ' di ' + b.total + '…</span>' : '<button class="btn primary" data-action="bulk-gen" data-s="' + esc(s.id) + '">Genera riepiloghi e flashcard dalle slide (' + todo + ')</button>') + '</div>';
+    if (ui.bulkMsg) h += '<p class="err" role="alert">' + esc(ui.bulkMsg) + '</p>';
+    return h + '</div></details></section>';
+  }
+  function runBulk(sid) {
+    var todo = (sid ? subj(sid).lessons.map(function (l) { return { s: subj(sid), l: l }; }) : reviewItems()).filter(function (x) { return sid ? (x.l.src && (!x.l.ai || !x.l.ai.slides)) : (!x.l.ai || (x.l.src && !x.l.ai.slides)); });
     ui.bulk = { running: true, done: 0, total: todo.length, stop: false }; ui.bulkMsg = ''; render();
     var i = 0;
     (function next() {
@@ -557,9 +646,9 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
       h += '</div></section>';
     }
 
-    var json = JSON.stringify(state);
+    var json = JSON.stringify(state, function (k, v) { return k === 'src' ? undefined : v; });
     h += '<section class="panel"><details class="backup"><summary>Backup e ripristino</summary><div class="stack">' +
-      '<p class="msg">Copia questo testo e conservalo (per esempio in Note) per salvare tutti i dati. Per ripristinarli incollalo nel secondo riquadro.</p>' +
+      '<p class="msg">Copia questo testo e conservalo (per esempio in Note) per salvare tutti i dati. Il testo delle slide non è incluso: si ricarica dai file. Per ripristinarli incollalo nel secondo riquadro.</p>' +
       '<textarea id="backup-out" readonly aria-label="Dati da copiare">' + esc(json) + '</textarea>' +
       '<div><button class="btn" data-action="copy-backup">Copia i dati</button></div>' +
       '<textarea id="backup-in" placeholder="Incolla qui i dati salvati" aria-label="Dati da ripristinare"></textarea>' +
@@ -598,6 +687,7 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
       '<label class="field-row" style="font-size:16px;color:inherit"><input type="checkbox" id="import-seen" data-field="import-seen" style="width:24px;height:24px"' + (ui.importSeen ? ' checked' : '') + '> Segna come già seguite</label>' +
       '<div><button class="btn primary" data-action="import-lessons" data-s="' + esc(s.id) + '">Importa</button></div>' +
       '<p class="msg" role="status">' + esc(ui.importMsg || '') + '</p></div></details></section>';
+    h += renderSlides(s);
 
     h += '<section><h2 class="section-title">Lezioni <span class="num" style="color:var(--muted);font-size:15px">' + st.n + '</span></h2>';
     if (!s.lessons.length) {
@@ -690,7 +780,14 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     else if (a === 'ai-gen') { generate(sid, lid).catch(function () {}); }
     else if (a === 'ai-toggle') { ui.open[lid] = !ui.open[lid]; render(); }
     else if (a === 'rev-filter') { ui.rev.filter = el.getAttribute('data-v'); ui.deck = null; render(); }
-    else if (a === 'bulk-gen') { runBulk(); }
+    else if (a === 'bulk-gen') { runBulk(sid || null); }
+    else if (a === 'slides-apply') {
+      var ss = subj(sid), k = 0;
+      ui.slides.forEach(function (x) { if (x.lesson && x.text) { var ls = lesson(ss, x.lesson); if (ls) { ls.src = x.text; k++; } } });
+      ui.slidesMsg = k ? 'Salvate le slide di ' + k + ' lezioni. Ora puoi generare i riepiloghi.' : 'Nessun file associato a una lezione.';
+      if (k) ui.slides = [];
+      save(); render();
+    }
     else if (a === 'bulk-stop') { if (ui.bulk) ui.bulk.stop = true; }
     else if (a === 'deck-start') {
       var cards = [];
@@ -750,6 +847,8 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     var el = e.target, f = el.getAttribute && el.getAttribute('data-field');
     if (!f) return;
     var sid = el.getAttribute('data-s'), lid = el.getAttribute('data-l');
+    if (f === 'slides') { if (el.files && el.files.length) handleSlides(sid, el.files); return; }
+    if (f === 'slide-match') { ui.slides[+el.getAttribute('data-i')].lesson = el.value; return; }
     if (f === 'import-seen') { ui.importSeen = el.checked; return; }
     if (f === 'import-text') { ui.importText = el.value; return; }
     if (f === 'exam') { subj(sid).exam = el.value; save(); render(); }
