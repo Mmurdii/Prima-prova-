@@ -244,7 +244,7 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
   function parse(s) { var p = s.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); }
   function daysBetween(a, b) { return Math.round((Date.UTC.apply(null, ymd(b)) - Date.UTC.apply(null, ymd(a))) / 864e5); }
   function ymd(s) { var p = s.split('-').map(Number); return [p[0], p[1] - 1, p[2]]; }
-  function shortDate(s) { return parse(s).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }); }
+  function shortDate(s) { return !s ? '' : parse(s).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }); }
   function addDays(s, n) { var d = parse(s); d.setDate(d.getDate() + n); return iso(d); }
 
   /* ---------- stato ---------- */
@@ -269,7 +269,12 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
   var state = load();
   try { localStorage.setItem(KEY + '-t', '1'); localStorage.removeItem(KEY + '-t'); } catch (e) { storageOk = false; }
 
-  var ui = { confirm: null, notes: {}, newSubject: false, draft: { title: '', date: today() }, backupMsg: '',
+  var BIOCHIMICA_ELENCO = [
+    'Introduzione', 'Acqua', 'DNA', 'Proteine', 'Lipidi', 'Carboidrati', 'Emoglobina', 'Enzimi', 'Cinetica enzimatica', 'Trasporto',
+    'Vitamine', 'Biosegnalazione', 'Ormoni', 'Introduzione al metabolismo', 'Catabolismo del glucosio', 'Metabolismo del glicogeno',
+    'Il ciclo di Krebs', 'Fosforilazione ossidativa', 'Metabolismo lipidico', 'Metabolismo proteico'
+  ].join('\n');
+  var ui = { importText: null, importSeen: true, importMsg: '', confirm: null, notes: {}, newSubject: false, draft: { title: '', date: today() }, backupMsg: '',
     open: {}, busy: {}, err: {}, rev: { filter: 'all' }, deck: null, bulk: null, bulkMsg: '' };
 
   /* ---------- riepiloghi IA (capability "sample") ---------- */
@@ -360,7 +365,7 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
       h += '<section><h2 class="section-title">Riepiloghi <span class="num" style="color:var(--muted);font-size:15px">' + withAi.length + '</span></h2><div class="glance">' +
         withAi.map(function (x) {
           var a = x.l.ai, due = pr(x) === 0;
-          return '<article class="panel gcard" style="--c:' + colorVar(x.s) + '"><div class="sub"><span class="swatch"></span>' + esc(x.s.name) + ' · ' + esc(shortDate(x.l.date)) + (due ? ' · <b style="color:var(--warn)">da ripassare</b>' : '') + '</div>' +
+          return '<article class="panel gcard" style="--c:' + colorVar(x.s) + '"><div class="sub"><span class="swatch"></span>' + esc(x.s.name) + (x.l.date ? ' · ' + esc(shortDate(x.l.date)) : '') + (due ? ' · <b style="color:var(--warn)">da ripassare</b>' : '') + '</div>' +
             '<h3>' + esc(x.l.title) + '</h3><p style="margin:0">' + esc(a.brief) + '</p><ul style="margin:0;padding-left:20px">' + a.points.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>' +
             '<div class="actions">' + (x.l.done.ripassata ? '<span class="msg">Ripassata il ' + esc(shortDate(x.l.done.ripassata)) + '</span>' : '<button class="btn small" data-action="advance" data-s="' + esc(x.s.id) + '" data-l="' + esc(x.l.id) + '" data-step="ripassata">Segna ripassata</button>') + '</div></article>';
         }).join('') + '</div></section>';
@@ -526,9 +531,9 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     });
     h += '</div></section>';
 
-    var todo = todoGroup('Da studiare', all.backlog, 'studiata', 'Segna studiata', function (l) { return 'seguita il ' + shortDate(l.date); }) +
+    var todo = todoGroup('Da studiare', all.backlog, 'studiata', 'Segna studiata', function (l) { return l.date ? 'seguita il ' + shortDate(l.date) : 'seguita'; }) +
       todoGroup('Da ripassare', all.review, 'ripassata', 'Segna ripassata', function (l) { return 'studiata il ' + shortDate(l.done.studiata); }) +
-      todoGroup('Appunti da completare', all.noNotes, 'appunti', 'Appunti fatti', function (l) { return 'lezione del ' + shortDate(l.date); });
+      todoGroup('Appunti da completare', all.noNotes, 'appunti', 'Appunti fatti', function (l) { return l.date ? 'lezione del ' + shortDate(l.date) : 'lezione'; });
     h += '<section class="panel"><h2 class="section-title">Da fare adesso</h2>' + (todo || '<p class="empty">Niente in sospeso.</p>') + '</section>';
 
     var days = [], max = 3;
@@ -585,6 +590,14 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
       '<input type="text" id="new-title" data-field="draft-title" placeholder="Titolo (es. Potenziale d’azione)" aria-label="Titolo della lezione" autocomplete="off" value="' + esc(ui.draft.title) + '">' +
       '<input type="date" data-field="draft-date" aria-label="Data della lezione" value="' + esc(ui.draft.date) + '">' +
       '<button class="btn primary" type="submit">Aggiungi</button></form></section>';
+
+    var imp = ui.importText != null ? ui.importText : (s.id === 'biochimica' && !s.lessons.length ? BIOCHIMICA_ELENCO : '');
+    h += '<section class="panel"><details class="backup"' + (!s.lessons.length || ui.importMsg ? ' open' : '') + '><summary>Importa un elenco di lezioni</summary><div class="stack">' +
+      '<p class="msg">Una lezione per riga. Le righe già presenti vengono saltate. Dopo l’importazione puoi correggere ogni titolo toccandolo.</p>' +
+      '<textarea id="import-text" data-field="import-text" style="font-family:var(--font-body);font-size:16px;min-height:160px" aria-label="Elenco delle lezioni">' + esc(imp) + '</textarea>' +
+      '<label class="field-row" style="font-size:16px;color:inherit"><input type="checkbox" id="import-seen" data-field="import-seen" style="width:24px;height:24px"' + (ui.importSeen ? ' checked' : '') + '> Segna come già seguite</label>' +
+      '<div><button class="btn primary" data-action="import-lessons" data-s="' + esc(s.id) + '">Importa</button></div>' +
+      '<p class="msg" role="status">' + esc(ui.importMsg || '') + '</p></div></details></section>';
 
     h += '<section><h2 class="section-title">Lezioni <span class="num" style="color:var(--muted);font-size:15px">' + st.n + '</span></h2>';
     if (!s.lessons.length) {
@@ -652,6 +665,20 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
       else ui.confirm = 's:' + sid;
       render();
     }
+    else if (a === 'import-lessons') {
+      var si = subj(sid), box = document.getElementById('import-text');
+      var have = {}; si.lessons.forEach(function (x) { have[x.title.toLowerCase()] = true; });
+      var added = 0, skipped = 0, base = Date.now();
+      box.value.split('\n').forEach(function (line) {
+        var title = line.trim(); if (!title) return;
+        if (have[title.toLowerCase()]) { skipped++; return; }
+        have[title.toLowerCase()] = true;
+        si.lessons.push({ id: uid(), title: title, date: '', created: base + added, note: '', done: { seguita: ui.importSeen ? today() : null, appunti: null, studiata: null, ripassata: null } });
+        added++;
+      });
+      ui.importText = ''; ui.importMsg = added ? 'Importate ' + added + ' lezioni' + (skipped ? ' (' + skipped + ' già presenti, saltate)' : '') + '.' : 'Nessuna lezione nuova da importare.';
+      save(); render();
+    }
     else if (a === 'ai-gen') { generate(sid, lid).catch(function () {}); }
     else if (a === 'ai-toggle') { ui.open[lid] = !ui.open[lid]; render(); }
     else if (a === 'rev-filter') { ui.rev.filter = el.getAttribute('data-v'); ui.deck = null; render(); }
@@ -708,12 +735,15 @@ details.backup textarea { font-family: var(--font-mono); font-size: 13px; }
     var f = e.target.getAttribute && e.target.getAttribute('data-field');
     if (f === 'draft-title') ui.draft.title = e.target.value;
     if (f === 'draft-date') ui.draft.date = e.target.value;
+    if (f === 'import-text') ui.importText = e.target.value;
   });
 
   document.addEventListener('change', function (e) {
     var el = e.target, f = el.getAttribute && el.getAttribute('data-field');
     if (!f) return;
     var sid = el.getAttribute('data-s'), lid = el.getAttribute('data-l');
+    if (f === 'import-seen') { ui.importSeen = el.checked; return; }
+    if (f === 'import-text') { ui.importText = el.value; return; }
     if (f === 'exam') { subj(sid).exam = el.value; save(); render(); }
     else if (f === 'title') { var l = lesson(subj(sid), lid); l.title = el.value.trim() || l.title; save(); render(); }
     else if (f === 'note') { lesson(subj(sid), lid).note = el.value; save(); }
